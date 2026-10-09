@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>ایمیل موقت پایدار</title>
+  <link rel="manifest" href="manifest.json">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Tahoma', 'Segoe UI', sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      padding: 16px;
+      line-height: 1.6;
+    }
+    .container { max-width: 480px; margin: 0 auto; }
+    h1 { font-size: 1.4rem; margin-bottom: 12px; text-align: center; color: #38bdf8; }
+    .card {
+      background: #1e293b;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+      border: 1px solid #334155;
+    }
+    .email-box {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      background: #0f172a;
+      padding: 12px;
+      border-radius: 8px;
+      word-break: break-all;
+      font-size: 0.95rem;
+    }
+    .email-box span { flex: 1; }
+    button {
+      background: #0ea5e9;
+      color: white;
+      border: none;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    button:active { opacity: 0.85; }
+    button.secondary { background: #475569; }
+    button.danger { background: #dc2626; }
+    .btn-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+    .status { font-size: 0.85rem; color: #94a3b8; margin-top: 8px; text-align: center; }
+    .messages { margin-top: 8px; }
+    .msg {
+      background: #0f172a;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 10px;
+      border-right: 3px solid #38bdf8;
+    }
+    .msg-from { font-size: 0.8rem; color: #94a3b8; }
+    .msg-subject { font-weight: bold; margin: 4px 0; }
+    .msg-body { font-size: 0.9rem; white-space: pre-wrap; word-break: break-word; }
+    .copy-code {
+      display: inline-block;
+      background: #164e63;
+      color: #a5f3fc;
+      padding: 4px 8px;
+      border-radius: 4px;
+      margin: 4px 0;
+      cursor: pointer;
+      font-family: monospace;
+    }
+    .loading { text-align: center; padding: 20px; color: #94a3b8; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>ایمیل موقت پایدار</h1>
+
+    <div class="card">
+      <div class="email-box">
+        <span id="emailAddress">در حال آماده‌سازی...</span>
+        <button onclick="copyEmail()" id="copyBtn">کپی</button>
+      </div>
+      <div class="btn-row">
+        <button onclick="refreshInbox()">بروزرسانی اینباکس</button>
+        <button class="danger" onclick="createNewEmail()">ایجاد ایمیل جدید</button>
+      </div>
+      <div class="status" id="status">ایمیل تا وقتی دکمه جدید را نزنید ثابت می‌ماند</div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-bottom:10px;">صندوق ورودی</h3>
+      <div id="messages" class="messages">
+        <div class="loading">در حال بارگذاری...</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const WORDS = ["Hopton","Hampstead","Campimello","Vascocombe","Parna","Medigue","Kodesh","Ropajawa","Katlin","Besan","Fakat","Azhamon","Saite"];
+    const API = "https://api.mail.tm";
+
+    let current = {
+      address: null,
+      password: null,
+      token: null,
+      id: null
+    };
+
+    // ---------- Persistence ----------
+    function saveState() {
+      localStorage.setItem("tempmail_state", JSON.stringify(current));
+    }
+
+    function loadState() {
+      try {
+        const s = localStorage.getItem("tempmail_state");
+        if (s) current = JSON.parse(s);
+      } catch(e) {}
+    }
+
+    // ---------- Helpers ----------
+    function randomWord() {
+      return WORDS[Math.floor(Math.random() * WORDS.length)];
+    }
+
+    function randomStr(len = 4) {
+      return Math.random().toString(36).substring(2, 2 + len);
+    }
+
+    function setStatus(txt) {
+      document.getElementById("status").textContent = txt;
+    }
+
+    function showEmail() {
+      document.getElementById("emailAddress").textContent = current.address || "—";
+    }
+
+    // ---------- API ----------
+    async function getDomains() {
+      const res = await fetch(API + "/domains");
+      const data = await res.json();
+      return data["hydra:member"].filter(d => d.isActive).map(d => d.domain);
+    }
+
+    async function createAccount(address, password) {
+      const res = await fetch(API + "/accounts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address, password })
+      });
+      if (!res.ok) throw new Error("create failed");
+      return await res.json();
+    }
+
+    async function getToken(address, password) {
+      const res = await fetch(API + "/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address, password })
+      });
+      if (!res.ok) throw new Error("token failed");
+      return await res.json();
+    }
+
+    async function getMessages() {
+      if (!current.token) return [];
+      const res = await fetch(API + "/messages", {
+        headers: { Authorization: "Bearer " + current.token }
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data["hydra:member"] || [];
+    }
+
+    async function getMessage(id) {
+      const res = await fetch(API + "/messages/" + id, {
+        headers: { Authorization: "Bearer " + current.token }
+      });
+      return await res.json();
+    }
+
+    // ---------- Main logic ----------
+    async function ensureEmail() {
+      loadState();
+      if (current.address && current.token) {
+        // validate token still works
+        try {
+          await getMessages();
+          showEmail();
+          setStatus("ایمیل قبلی بازیابی شد — ثابت می‌ماند");
+          refreshInbox();
+          return;
+        } catch(e) {
+          // token expired → create new
+        }
+      }
+      await createNewEmail(true);
+    }
+
+    async function createNewEmail(silent = false) {
+      if (!silent && !confirm("آیا مطمئن هستید که می‌خواهید ایمیل جدید بسازید؟ ایمیل فعلی از بین می‌رود.")) return;
+
+      setStatus("در حال ساخت ایمیل جدید...");
+      document.getElementById("messages").innerHTML = '<div class="loading">صبر کنید...</div>';
+
+      try {
+        const domains = await getDomains();
+        const domain = domains[Math.floor(Math.random() * domains.length)];
+        const local = (randomWord() + randomStr(3) + randomWord()).toLowerCase().replace(/[^a-z0-9]/g, "");
+        const address = local + "@" + domain;
+        const password = randomStr(12) + "Aa1!";
+
+        await createAccount(address, password);
+        const tok = await getToken(address, password);
+
+        current = {
+          address,
+          password,
+          token: tok.token,
+          id: tok.id
+        };
+        saveState();
+        showEmail();
+        setStatus("ایمیل جدید ساخته شد و ذخیره شد");
+        refreshInbox();
+      } catch (err) {
+        console.error(err);
+        setStatus("خطا در ساخت ایمیل. دوباره تلاش کنید.");
+      }
+    }
+
+    async function refreshInbox() {
+      if (!current.token) return;
+      const box = document.getElementById("messages");
+      box.innerHTML = '<div class="loading">در حال دریافت...</div>';
+
+      try {
+        const list = await getMessages();
+        if (list.length === 0) {
+          box.innerHTML = '<div class="loading">هنوز ایمیلی نرسیده است</div>';
+          return;
+        }
+
+        let html = "";
+        for (const m of list) {
+          const full = await getMessage(m.id);
+          let body = full.text || full.html || "";
+          // simple code detection
+          body = body.replace(/(\b\d{4,8}\b)/g, '<span class="copy-code" onclick="copyText(\'$1\')">$1 (کپی)</span>');
+
+          html += `<div class="msg">
+            <div class="msg-from">از: ${full.from?.address || "ناشناس"}</div>
+            <div class="msg-subject">${full.subject || "بدون موضوع"}</div>
+            <div class="msg-body">${body.substring(0, 800)}</div>
+          </div>`;
+        }
+        box.innerHTML = html;
+        setStatus("آخرین بروزرسانی: " + new Date().toLocaleTimeString("fa-IR"));
+      } catch (e) {
+        box.innerHTML = '<div class="loading">خطا در دریافت ایمیل‌ها</div>';
+      }
+    }
+
+    function copyEmail() {
+      if (!current.address) return;
+      navigator.clipboard.writeText(current.address).then(() => {
+        setStatus("آدرس کپی شد ✓");
+      });
+    }
+
+    function copyText(t) {
+      navigator.clipboard.writeText(t).then(() => {
+        setStatus("کد «" + t + "» کپی شد ✓");
+      });
+    }
+
+    // Auto refresh every 20s
+    setInterval(refreshInbox, 20000);
+
+    // Start
+    ensureEmail();
+  </script>
+</body>
+</html>
